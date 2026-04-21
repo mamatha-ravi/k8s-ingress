@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: app1
-  # these labels are replicaset labels
   labels:
     project: roboshop
     tier: frontend
@@ -10,12 +9,10 @@ metadata:
 spec:
   replicas: 2
   selector:
-    # using these labels replica set selects the pod
     matchLabels:
       project: roboshop
       tier: frontend
       component: app1
-  # This is pod definition, pod is subset of replicaset
   template:
     metadata:
       labels:
@@ -27,42 +24,42 @@ spec:
       - name: app1
         image: mamatar/app1:1.0.0
 ---
+# Service must be NodePort -- old ALB ingress controller uses target-type: instance
+# ALB registers EC2 nodes, traffic comes in on NodePort, then forwards to pod
 apiVersion: v1
 kind: Service
 metadata:
   name: app1
 spec:
+  type: NodePort
   selector:
-    # labels are used as selectors
     project: roboshop
     tier: frontend
     component: app1
   ports:
   - protocol: TCP
-    port: 80 # servie port
-    targetPort: 80 # container port
+    port: 80
+    targetPort: 80
 ---
-apiVersion: networking.k8s.io/v1
+# OLD ALB Ingress Controller (before AWS Load Balancer Controller)
+# Problems:
+#   - target-type: instance → ALB → EC2 node (NodePort) → pod (extra hop)
+#   - no group.name → every app gets its OWN ALB (expensive)
+#   - v1beta1 API → removed in K8s 1.22
+apiVersion: networking.k8s.io/v1beta1
 kind: Ingress
 metadata:
   name: app1
   annotations:
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS": 443}]'
-    alb.ingress.kubernetes.io/certificate-arn: 'arn:aws:acm:us-east-1:982597090414:certificate/ba004d1e-51af-47fa-b6ac-6da6b35f662b'
+    kubernetes.io/ingress.class: "alb"
     alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/tags: Environment=dev,Project=roboshop
-    alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/group.name: roboshop
+    alb.ingress.kubernetes.io/target-type: instance
 spec:
-  ingressClassName: alb
   rules:
   - host: "app1.devops88s.online"
     http:
       paths:
-      - pathType: Prefix
-        path: "/"
+      - path: /
         backend:
-          service:
-            name: app1
-            port:
-              number: 80
+          serviceName: app1
+          servicePort: 80
